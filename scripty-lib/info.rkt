@@ -4,3 +4,5 @@
 
 (define deps
   '("base"))
+(define build-deps
+  '())

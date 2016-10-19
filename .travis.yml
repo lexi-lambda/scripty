@@ -18,6 +18,7 @@ before_install:
 install:
   - raco pkg install --installation --auto --link
       $TRAVIS_BUILD_DIR/scripty-lib
+      $TRAVIS_BUILD_DIR/scripty-doc
   - raco pkg install --installation --auto cover cover-coveralls
 
 script:
