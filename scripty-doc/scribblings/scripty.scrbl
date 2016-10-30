@@ -40,8 +40,8 @@ to the top, followed by a @deftech{script preamble}:
 
 @filebox["parse.rkt"]{
   @codeblock{
-    #!/usr/bin/env racket                      ; \
-    #lang scripty                              ; | script preamble
+    #!/usr/bin/env racket
+    #lang scripty                              ; \ script preamble
     #:dependencies '("base" "megaparsack-lib") ; /
     ------------------------------------------
     #lang racket/base
