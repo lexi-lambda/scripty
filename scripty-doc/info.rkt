@@ -7,4 +7,5 @@
 (define build-deps
   '("base"
     "racket-doc"
-    "scribble-lib"))
+    "scribble-lib"
+    "scripty-lib"))
