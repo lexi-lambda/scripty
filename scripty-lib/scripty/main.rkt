@@ -3,16 +3,17 @@
 ;; ---------------------------------------------------------------------------------------------------
 ;; scripty reader
 
-(module reader syntax/module-reader scripty
-  #:read                scripty:read
-  #:read-syntax         scripty:read-syntax
-  #:whole-body-readers? #t
+(module reader racket/base
+  (provide (rename-out [scripty:read read]
+                       [scripty:read-syntax read-syntax]
+                       [racket:get-info get-info]))
 
-  (require racket/format
-           racket/function
-           racket/string
-           syntax/modread
-           syntax/readerr)
+  (require racket/require
+           (multi-in racket [file format function match path string])
+           (multi-in syntax [modread parse readerr])
+           (prefix-in racket: (submod racket reader))
+           pkg/lib
+           setup/setup)
   
   (define (scripty:read in)
     (map syntax->datum (scripty:read-syntax #f in)))
@@ -41,6 +42,19 @@
             (if (eof-object? result) '()
                 (cons result (loop))))))
 
+      ; install provided dependencies (we need to do this at read-time in order to install
+      ; dependencies that are needed by custom #langs)
+      (syntax-parse preamble-stxs
+        #:context '|script prelude|
+        [({~or {~once {~seq #:dependencies dependencies:expr}}} ...)
+         (when (and (terminal-port? (current-output-port))
+                    (terminal-port? (current-input-port)))
+           (let* ([ns (make-base-namespace)]
+                  [deps-val (eval #'dependencies ns)]
+                  [pkg-name (string-replace (path->string (file-name-from-path src-name))
+                                            #px"[^a-zA-Z0-9_-]" "-")])
+             (perform-installation! #:name pkg-name #:deps deps-val)))])
+
       ; defer to the rest of the module to figure out how to read it properly
       (define body-stx
         (with-module-reading-parameterization
@@ -53,37 +67,9 @@
                                 " or (module <name> <language> ...)")
                             body-stx))
 
-      ; return the preamble and body module
-      (list preamble-stxs checked-body-stx))))
+      ; return the body module
+      checked-body-stx))
 
-;; ---------------------------------------------------------------------------------------------------
-;; scripty module language
-
-(require racket/require)
-
-(require (for-syntax (multi-in racket [base file format function match path string])
-                     pkg/lib
-                     setup/setup)
-         syntax/parse/define)
-
-(provide (for-syntax (all-from-out racket/base))
-         (rename-out [scripty:#%module-begin #%module-begin])
-         (except-out (all-from-out racket/base) #%module-begin))
-
-(define-syntax-parser scripty:#%module-begin
-  [(_ ({~or {~once {~seq #:dependencies dependencies:expr}}} ...)
-      {~and script-module ({~datum module} _ mod-language . mod-body)})
-   #:do [(define source-path (syntax-source #'script-module))]
-   #:with pkg-name (string-replace (path->string (file-name-from-path source-path))
-                                   #px"[^a-zA-Z0-9_-]" "-")
-   #'(#%module-begin
-      (begin-for-syntax
-        (when (and (terminal-port? (current-output-port))
-                   (terminal-port? (current-input-port)))
-          (perform-installation! #:name 'pkg-name #:deps dependencies)))
-      (module main mod-language . mod-body))])
-
-(begin-for-syntax
   (define (create-tmp-pkg name #:deps deps)
     (let ([pkg-dir (make-temporary-file (~a name "~a") 'directory)])
       (parameterize ([current-directory pkg-dir])
@@ -95,20 +81,20 @@
   (define (perform-installation! #:name name #:deps deps)
     (parameterize ([current-pkg-scope (default-pkg-scope)])
       (with-pkg-lock
-          (let* ([tmp-pkg-dir (create-tmp-pkg name #:deps deps)]
-                 [install-result (pkg-install (list (pkg-desc (path->string tmp-pkg-dir)
-                                                              'link name #f #t))
-                                              #:dep-behavior 'search-ask)]
-                 [remove-result (pkg-remove (list name) #:quiet? #t)]
-                 [collections (match* (install-result remove-result)
-                                [(#f #f) #f]
-                                [({or {and 'skip {app (const '()) collects-a}} collects-a}
-                                  {or {and 'skip {app (const '()) collects-b}} collects-b})
-                                 (filter
-                                  (λ (x) (not (equal? x (list name))))
-                                  (append (map (λ (x) (if (list? x) x (list x))) collects-a)
-                                          (map (λ (x) (if (list? x) x (list x))) collects-b)))])])
-            (unless (null? collections)
-              (setup #:fail-fast? #t
-                     #:collections collections)
-              (newline)))))))
+       (let* ([tmp-pkg-dir (create-tmp-pkg name #:deps deps)]
+              [install-result (pkg-install (list (pkg-desc (path->string tmp-pkg-dir)
+                                                           'link name #f #t))
+                                           #:dep-behavior 'search-ask)]
+              [remove-result (pkg-remove (list name) #:quiet? #t)]
+              [collections (match* (install-result remove-result)
+                             [(#f #f) #f]
+                             [({or {and 'skip {app (const '()) collects-a}} collects-a}
+                               {or {and 'skip {app (const '()) collects-b}} collects-b})
+                              (filter
+                               (λ (x) (not (equal? x (list name))))
+                               (append (map (λ (x) (if (list? x) x (list x))) collects-a)
+                                       (map (λ (x) (if (list? x) x (list x))) collects-b)))])])
+         (unless (null? collections)
+           (setup #:fail-fast? #t
+                  #:collections collections)
+           (newline)))))))
